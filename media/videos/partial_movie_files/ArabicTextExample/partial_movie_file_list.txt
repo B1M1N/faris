@@ -1,0 +1,2 @@
+# This file is used internally by FFMPEG.
+file 'file:C:/Users/bsm99/OneDrive - Umm Al-Qura University/Desktop/faris/media/videos/partial_movie_files/ArabicTextExample/1294469148_3185860355_2941110916.mp4'
