@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chat Assistant</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+            padding: 20px;
+        }
+        .chat-box {
+            width: 50%;
+            margin: auto;
+            border: 1px solid #ddd;
+            padding: 20px;
+            border-radius: 10px;
+        }
+        .message {
+            margin: 10px 0;
+            padding: 10px;
+            border-radius: 5px;
+        }
+        .user {
+            background: #d1e7fd;
+            text-align: right;
+        }
+        .assistant {
+            background: #e8e8e8;
+            text-align: left;
+        }
+        input {
+            width: 80%;
+            padding: 10px;
+            margin-top: 10px;
+        }
+        button {
+            padding: 10px 15px;
+            margin-top: 10px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <h1>Chat with Your Assistant 🤖</h1>
+    <div class="chat-box" id="chat-box">
+        <div class="message assistant">Hello! How can I assist you?</div>
+    </div>
+    <input type="text" id="user-input" placeholder="Type your message...">
+    <button onclick="sendMessage()">Send</button>
+
+    <script>
+        async function sendMessage() {
+            const userInput = document.getElementById("user-input").value;
+            if (!userInput) return;
+
+            const chatBox = document.getElementById("chat-box");
+
+            // Add user's message to chat
+            const userMessage = document.createElement("div");
+            userMessage.className = "message user";
+            userMessage.innerText = userInput;
+            chatBox.appendChild(userMessage);
+
+            document.getElementById("user-input").value = ""; // Clear input
+
+            // Send message to server
+            const response = await fetch("/chat", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ message: userInput })
+            });
+
+            const result = await response.json();
+
+            // Add assistant's response
+            const assistantMessage = document.createElement("div");
+            assistantMessage.className = "message assistant";
+            assistantMessage.innerText = result.response;
+            chatBox.appendChild(assistantMessage);
+        }
+    </script>
+</body>
+</html>
