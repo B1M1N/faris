@@ -3,18 +3,27 @@ from tkinter import messagebox, scrolledtext
 import threading
 import sounddevice as sd
 import numpy as np
-from transformers import Wav2Vec2Processor, Wav2Vec2ForCTC
-from transformers import pipeline
-from huggingsound import SpeechRecognitionModel
+#from transformers import Wav2Vec2Processor, Wav2Vec2ForCTC
+#from transformers import pipeline
+from elevenlabs.client import ElevenLabs
+#from transformers import SpeechRecognitionModel
+#import soundfile as sf
+#import noisereduce as nr
+import numpy as np
+#from huggingsound import SpeechRecognitionModel
 import wavio
 import openai
 import pygame
 import os
-from manim import *
+from pydub import AudioSegment
+#from manim import *
+#import whisper
 from PIL import Image, ImageTk,ImageSequence
 import subprocess
 import sys
-import elevenlabs
+#import requests
+#import elevenlabs
+
 if sys.platform.startswith('win'):
     os.add_dll_directory(r"C:\Program Files\VideoLAN\VLC")  # Update this path if necessary
 #ldeGOUQJqLGjlVgYn7YL
@@ -86,8 +95,8 @@ def process_audio():
         print("ChatGPT Response:", response_text)
 
         # Generate Manim animation with the response text
-        status_label.config(text="Generating Animation...")
-        generate_manim_animation(response_text)
+       # status_label.config(text="Generating Animation...")
+        #generate_manim_animation(response_text)
 
         # Convert response to speech
         status_label.config(text="Converting Text to Speech...")
@@ -114,16 +123,36 @@ def process_audio():
         record_button.config(state=tk.NORMAL)
         stop_button.config(state=tk.DISABLED)
 
+   
+
+
+def split_audio(filename, segment_length_ms=10000):
+    """
+    تقسيم الصوت إلى أجزاء صغيرة.
+    """
+    audio = AudioSegment.from_file(filename)
+    segments = []
+    for i in range(0, len(audio), segment_length_ms):
+        segment = audio[i:i + segment_length_ms]
+        segment_filename = f"segment_{i}.wav"
+        segment.export(segment_filename, format="wav")
+        segments.append(segment_filename)
+    return segments
+
 def transcribe_audio(filename):
     try:
-        # Create an ASR pipeline using the wav2vec2 model
-        asr = pipeline("automatic-speech-recognition", model="facebook/wav2vec2-large-xlsr-53-arabic")
-        result = asr(filename)
-        return result.get("text", "")
+        # Using OpenAI Whisper API
+        with open(filename, "rb") as audio_file:
+            response = openai.audio.transcriptions.create(
+                file=audio_file,
+                model="whisper-1",
+                language="ar"
+            )
+        return response.text
     except Exception as e:
-        print(f"An error occurred during transcription: {e}")
+        messagebox.showerror("Error", f"Transcription failed:\n\n{e}")
         return ""
-
+    
 # Function to interact with ChatGPT API
 def chat_with_gpt(transcribed_text):
     if not transcribed_text:
@@ -146,18 +175,41 @@ def chat_with_gpt(transcribed_text):
 
 
 # Function to convert text to speech using OpenAI
+
+
+'''def text_to_speech(text, output_filename):
+    try:
+        # Create an ElevenLabs client
+        client = ElevenLabs(api_key="sk_274b05820004e924913b674d3c4181aae2b89df0f66a2806")
+
+        # Generate speech and save it to a file
+        with open(output_filename, "wb") as file:
+            audio_stream = client.text_to_speech.convert_as_stream(
+                voice_id="5Spsi3mCH9e7futpnGE5",  # Replace this with your ElevenLabs Voice ID
+                text=text
+            )
+            for chunk in audio_stream:
+                file.write(chunk)
+
+        # Check if the file was saved successfully
+        if os.path.exists(output_filename):
+            print(f"Audio file saved successfully as {output_filename}")
+        else:
+            raise Exception("Failed to save audio file.")
+
+    except Exception as e:
+        messagebox.showerror("Error", f"Text-to-Speech conversion failed: {e}")'''
 def text_to_speech(text, output_filename):
     try:
         response = openai.audio.speech.create(
         model="tts-1",  
-        voice="onyx",
+        voice="coral",
         input=text
         )
 
         response.stream_to_file(output_filename)
     except Exception as e:
         messagebox.showerror("Error", f"Text-to-Speech conversion failed: {e}")
-
 
 
 
@@ -172,8 +224,8 @@ def play_audio(filename):
         messagebox.showerror("Error", f"Audio playback failed:\n\n{e}")
 
 # Function to generate Manim animation
-def generate_manim_animation(text_to_display):
-    class ArabicTextExample(Scene):
+#def generate_manim_animation(text_to_display):
+    '''class ArabicTextExample(Scene):
         def construct(self):
             # Arabic text to display
             arabic_text = f"<span lang='ar'>{text_to_display}</span>"
@@ -194,18 +246,18 @@ def generate_manim_animation(text_to_display):
            # self.wait(2)
     
     # Configure Manim settings
-    config.background_color = "#000000"
-    config.media_dir = "./media"
-    config.video_dir = "./media/videos"
-    config.images_dir = "./media/images"
-    config.frame_rate = 30
-    config.pixel_height = 480
-    config.pixel_width = 854
-    config.output_file = "arabic_text_animation.mp4"
+   # config.background_color = "#000000"
+   # config.media_dir = "./media"
+    #config.video_dir = "./media/videos"
+    #config.images_dir = "./media/images"
+    #config.frame_rate = 30
+    #config.pixel_height = 480
+    #config.pixel_width = 854
+    #config.output_file = "arabic_text_animation.mp4"
     
     # Render the scene
     scene = ArabicTextExample()
-    scene.render()
+    scene.render()'''
 
 
 def merge_audio_and_video(video_input, audio_input, output_path):
