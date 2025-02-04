@@ -20,6 +20,7 @@ if sys.platform.startswith('win'):
 import vlc
 openai.api_key = os.getenv('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' )
 ASSISTANT_ID = "asst_FDuUSbtE6aPgnDdUYV1lKgyE"
+conversation_thread_id = None
 
 # Global variables
 recording = False
@@ -131,14 +132,17 @@ def transcribe_audio(filename):
     
 # Function to interact with ChatGPT API
 def chat_with_gpt(transcribed_text):
+    global conversation_thread_id
     if not transcribed_text:
         return "لم يتم الحصول على نص من التسجيل."
     try:
-        # Create a new thread (optional: can reuse an existing thread)
-        thread = openai.beta.threads.create()
-        thread_id = thread.id
+        # If no conversation thread exists, create one
+        if conversation_thread_id is None:
+            thread = openai.beta.threads.create()
+            conversation_thread_id = thread.id
+        thread_id = conversation_thread_id
 
-        # Send the transcribed text to the assistant
+        # Send the transcribed text as a new message in the existing conversation
         openai.beta.threads.messages.create(
             thread_id=thread_id,
             role="user",
@@ -159,16 +163,17 @@ def chat_with_gpt(transcribed_text):
                 run_id=run.id,
             )
 
-        # Fetch assistant's response
+        # Fetch the assistant's response from the conversation thread
         messages = openai.beta.threads.messages.list(thread_id=thread_id)
         for message in reversed(messages.data):
             if message.role == "assistant":
-                reply = "\n".join(block.text.value for block in message.content if hasattr(block, "text")) + ""
+                reply = "\n".join(
+                    block.text.value for block in message.content if hasattr(block, "text")
+                )
                 return reply
 
     except Exception as e:
         return f"❌ حدث خطأ أثناء الحصول على الاستجابة: {e}"
-
 
 # Function to convert text to speech using OpenAI
 
