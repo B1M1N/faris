@@ -1,35 +1,25 @@
+# -*- coding: utf-8 -*-
 import tkinter as tk
 from tkinter import messagebox, scrolledtext
 import threading
 import sounddevice as sd
 import numpy as np
-#from transformers import Wav2Vec2Processor, Wav2Vec2ForCTC
-#from transformers import pipeline
-from elevenlabs.client import ElevenLabs
-#from transformers import SpeechRecognitionModel
-#import soundfile as sf
-#import noisereduce as nr
+from elevenlabs import ElevenLabs,VoiceSettings
 import numpy as np
-#from huggingsound import SpeechRecognitionModel
 import wavio
 import openai
 import pygame
 import os
-from pydub import AudioSegment
-#from manim import *
-#import whisper
 from PIL import Image, ImageTk,ImageSequence
 import subprocess
 import sys
-#import requests
-#import elevenlabs
-
+import time
 if sys.platform.startswith('win'):
     os.add_dll_directory(r"C:\Program Files\VideoLAN\VLC")  # Update this path if necessary
 #ldeGOUQJqLGjlVgYn7YL
 import vlc
 openai.api_key = os.getenv('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' )
-
+ASSISTANT_ID = "asst_FDuUSbtE6aPgnDdUYV1lKgyE"
 
 # Global variables
 recording = False
@@ -125,20 +115,6 @@ def process_audio():
 
    
 
-
-def split_audio(filename, segment_length_ms=10000):
-    """
-    تقسيم الصوت إلى أجزاء صغيرة.
-    """
-    audio = AudioSegment.from_file(filename)
-    segments = []
-    for i in range(0, len(audio), segment_length_ms):
-        segment = audio[i:i + segment_length_ms]
-        segment_filename = f"segment_{i}.wav"
-        segment.export(segment_filename, format="wav")
-        segments.append(segment_filename)
-    return segments
-
 def transcribe_audio(filename):
     try:
         # Using OpenAI Whisper API
@@ -158,48 +134,77 @@ def chat_with_gpt(transcribed_text):
     if not transcribed_text:
         return "لم يتم الحصول على نص من التسجيل."
     try:
-        prompt = "أنت معلم مفيد يشرح المفاهيم بوضوح باللغة العربية."  # Arabic prompt for acting as a teacher
-        messages = [
-            {"role": "system", "content": prompt},
-            {"role": "user", "content": transcribed_text},
-        ]
-        response = openai.chat.completions.create(
-            model="gpt-4o",
-            messages=messages,
+        # Create a new thread (optional: can reuse an existing thread)
+        thread = openai.beta.threads.create()
+        thread_id = thread.id
+
+        # Send the transcribed text to the assistant
+        openai.beta.threads.messages.create(
+            thread_id=thread_id,
+            role="user",
+            content=transcribed_text,
         )
-        reply = response.choices[0].message.content
-        return reply
+
+        # Run the assistant
+        run = openai.beta.threads.runs.create_and_poll(
+            thread_id=thread_id,
+            assistant_id=ASSISTANT_ID,
+        )
+
+        # Wait for response
+        while run.status not in ["completed", "failed"]:
+            time.sleep(1)
+            run = openai.beta.threads.runs.retrieve(
+                thread_id=thread_id,
+                run_id=run.id,
+            )
+
+        # Fetch assistant's response
+        messages = openai.beta.threads.messages.list(thread_id=thread_id)
+        for message in reversed(messages.data):
+            if message.role == "assistant":
+                reply = "\n".join(block.text.value for block in message.content if hasattr(block, "text")) + ""
+                return reply
+
     except Exception as e:
-        messagebox.showerror("Error", f"ChatGPT API call failed: {e}")
-        return "حدث خطأ أثناء الحصول على الاستجابة."
+        return f"❌ حدث خطأ أثناء الحصول على الاستجابة: {e}"
 
 
 # Function to convert text to speech using OpenAI
 
 
-'''def text_to_speech(text, output_filename):
+def text_to_speech(text, output_filename):
     try:
-        # Create an ElevenLabs client
         client = ElevenLabs(api_key="sk_274b05820004e924913b674d3c4181aae2b89df0f66a2806")
 
-        # Generate speech and save it to a file
+        voice_settings = VoiceSettings(
+            stability=0.75,        
+            similarity_boost=0.6,   
+            style=0.3,              
+            speed=0.1 
+        )
         with open(output_filename, "wb") as file:
             audio_stream = client.text_to_speech.convert_as_stream(
-                voice_id="5Spsi3mCH9e7futpnGE5",  # Replace this with your ElevenLabs Voice ID
-                text=text
+                voice_id="egFWq5W0j5U7Q3RFFA8g",
+                text=text,
+                model_id="eleven_multilingual_v2",
+                voice_settings=voice_settings  # تمرير كائن الإعدادات
             )
+
             for chunk in audio_stream:
                 file.write(chunk)
 
-        # Check if the file was saved successfully
+      
         if os.path.exists(output_filename):
             print(f"Audio file saved successfully as {output_filename}")
         else:
             raise Exception("Failed to save audio file.")
 
     except Exception as e:
-        messagebox.showerror("Error", f"Text-to-Speech conversion failed: {e}")'''
-def text_to_speech(text, output_filename):
+        messagebox.showerror("Error", f"Text-to-Speech conversion failed: {e}")
+
+    
+'''def text_to_speech(text, output_filename):
     try:
         response = openai.audio.speech.create(
         model="tts-1",  
@@ -209,7 +214,7 @@ def text_to_speech(text, output_filename):
 
         response.stream_to_file(output_filename)
     except Exception as e:
-        messagebox.showerror("Error", f"Text-to-Speech conversion failed: {e}")
+        messagebox.showerror("Error", f"Text-to-Speech conversion failed: {e}")'''
 
 
 
@@ -223,41 +228,6 @@ def play_audio(filename):
     except Exception as e:
         messagebox.showerror("Error", f"Audio playback failed:\n\n{e}")
 
-# Function to generate Manim animation
-#def generate_manim_animation(text_to_display):
-    '''class ArabicTextExample(Scene):
-        def construct(self):
-            # Arabic text to display
-            arabic_text = f"<span lang='ar'>{text_to_display}</span>"
-            
-            # Create a MarkupText object with the Arabic text and specify the font
-            text = MarkupText(arabic_text, font="Amiri", color=WHITE)
-            
-            # Scale the text to fit within the frame width
-            max_width = config.frame_width - 1  # Leave some margin
-            if text.width > max_width:
-                text.width = max_width
-            
-            # Center the text on the screen
-            text.move_to(ORIGIN)
-            
-            # Display the text on the screen
-            self.play(Write(text, reverse=True))
-           # self.wait(2)
-    
-    # Configure Manim settings
-   # config.background_color = "#000000"
-   # config.media_dir = "./media"
-    #config.video_dir = "./media/videos"
-    #config.images_dir = "./media/images"
-    #config.frame_rate = 30
-    #config.pixel_height = 480
-    #config.pixel_width = 854
-    #config.output_file = "arabic_text_animation.mp4"
-    
-    # Render the scene
-    scene = ArabicTextExample()
-    scene.render()'''
 
 
 def merge_audio_and_video(video_input, audio_input, output_path):
@@ -311,6 +281,7 @@ def play_video_with_vlc(video_path):
 
         # Stop the Explanation GIF after playback
         stop_gif_animation()
+        start_gif_animation("gifs/bw.gif")
 
     except Exception as e:
         messagebox.showerror("Error", f"Error playing video:\n\n{e}")
@@ -348,8 +319,8 @@ def init_gui():
     gif_label = tk.Label(root)
 
     # Set the desired x and y coordinates for the GIF
-    gif_x = 300  # Replace with your desired x coordinate
-    gif_y = 200  # Replace with your desired y coordinate
+    gif_x = 0  # Replace with your desired x coordinate
+    gif_y = 0  # Replace with your desired y coordinate
 
     gif_label.place(x=gif_x, y=gif_y)
 
@@ -440,6 +411,8 @@ def stop_gif_animation():
 def main():
     # Set up OpenAI API key
     openai.api_key ='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' # Use environment variable for API key
+            
+    start_gif_animation("gifs/bw.gif")
 
     # Initialize Pygame mixer
     pygame.mixer.init()
