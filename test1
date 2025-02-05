@@ -1,0 +1,85 @@
+import openai
+import time
+import tkinter as tk
+from tkinter import scrolledtext
+import threading
+from typing_extensions import override
+from openai import AssistantEventHandler
+
+# Set your OpenAI API key
+openai.api_key = "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"  # Replace with your actual API key
+
+# Your Assistant ID (Replace with the correct one)
+ASSISTANT_ID = "asst_FDuUSbtE6aPgnDdUYV1lKgyE"
+
+class EventHandler(AssistantEventHandler):
+    """ Handles real-time response streaming from OpenAI """
+
+    def __init__(self, chat_display):
+        super().__init__()
+        self.chat_display = chat_display
+
+    @override
+    def on_text_created(self, text) -> None:
+        """ Called when a response starts """
+        self.chat_display.insert(tk.END, "\nAI: ", "bold")
+        self.chat_display.yview(tk.END)
+
+    @override
+    def on_text_delta(self, delta, snapshot):
+        """ Stream in response text """
+        self.chat_display.insert(tk.END, delta.value)
+        self.chat_display.yview(tk.END)
+
+def chat_with_assistant(user_input, chat_display):
+    """ Sends a message and streams OpenAI's response """
+
+    # Step 1: Create a thread
+    thread = openai.beta.threads.create()
+    thread_id = thread.id  
+
+    # Step 2: Add user message to the thread
+    openai.beta.threads.messages.create(
+        thread_id=thread_id,
+        role="user",
+        content=user_input
+    )
+
+    # Step 3: Stream response
+    with openai.beta.threads.runs.stream(
+        thread_id=thread_id,
+        assistant_id=ASSISTANT_ID,
+        event_handler=EventHandler(chat_display)
+    ) as stream:
+        stream.until_done()  
+
+def send_message():
+    """ Handles sending user input """
+    user_input = user_entry.get().strip()
+    if user_input:
+        chat_display.insert(tk.END, f"\nYou: {user_input}\n", "bold")
+        user_entry.delete(0, tk.END)  
+        chat_display.yview(tk.END)
+
+        # Run OpenAI call in a separate thread
+        threading.Thread(target=chat_with_assistant, args=(user_input, chat_display), daemon=True).start()
+
+# Create GUI Window
+root = tk.Tk()
+root.title("AI Chatbot with Streaming")
+
+# Chat display (scrollable)
+chat_display = scrolledtext.ScrolledText(root, wrap=tk.WORD, width=60, height=20, font=("Arial", 12))
+chat_display.pack(padx=10, pady=10)
+chat_display.tag_configure("bold", font=("Arial", 12, "bold"))
+
+# User input field
+user_entry = tk.Entry(root, width=50, font=("Arial", 12))
+user_entry.pack(padx=10, pady=5, side=tk.LEFT, expand=True)
+
+# Send button
+send_button = tk.Button(root, text="Send", command=send_message, font=("Arial", 12))
+send_button.pack(padx=10, pady=5, side=tk.RIGHT)
+
+# Run the GUI
+root.mainloop()
