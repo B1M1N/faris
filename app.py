@@ -20,7 +20,6 @@ if sys.platform.startswith('win'):
 import vlc
 openai.api_key = os.getenv('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' )
 ASSISTANT_ID = "asst_FDuUSbtE6aPgnDdUYV1lKgyE"
-print("check before init:", conversation_thread_id)  # Debug print
 conversation_thread_id = None
 print("check after:", conversation_thread_id)  # Debug print
 conversation_lock = threading.Lock()
