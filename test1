@@ -7,10 +7,10 @@ from typing_extensions import override
 from openai import AssistantEventHandler
 
 # ضع مفتاح API الخاص بك
-openai.api_key = "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"
+openai.api_key = ""
 
 # معرف المساعد (تأكد من صحة المعرف)
-ASSISTANT_ID = "asst_FDuUSbtE6aPgnDdUYV1lKgyE"
+ASSISTANT_ID = ""
 
 # تعريف معرف الحوار العام (سيتم إنشاؤه مرة واحدة فقط)
 conversation_thread_id = None
