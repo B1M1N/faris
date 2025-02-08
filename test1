@@ -6,80 +6,84 @@ import threading
 from typing_extensions import override
 from openai import AssistantEventHandler
 
-# Set your OpenAI API key
-openai.api_key = "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"  # Replace with your actual API key
+# ضع مفتاح API الخاص بك
+openai.api_key = "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"
 
-# Your Assistant ID (Replace with the correct one)
+# معرف المساعد (تأكد من صحة المعرف)
 ASSISTANT_ID = "asst_FDuUSbtE6aPgnDdUYV1lKgyE"
 
-class EventHandler(AssistantEventHandler):
-    """ Handles real-time response streaming from OpenAI """
+# تعريف معرف الحوار العام (سيتم إنشاؤه مرة واحدة فقط)
+conversation_thread_id = None
 
+class EventHandler(AssistantEventHandler):
+    """معالج الأحداث لبث الردود في الوقت الفعلي من OpenAI"""
+    
     def __init__(self, chat_display):
         super().__init__()
         self.chat_display = chat_display
 
     @override
     def on_text_created(self, text) -> None:
-        """ Called when a response starts """
+        """يتم استدعاؤه عند بدء الرد"""
         self.chat_display.insert(tk.END, "\nAI: ", "bold")
         self.chat_display.yview(tk.END)
 
     @override
     def on_text_delta(self, delta, snapshot):
-        """ Stream in response text """
+        """بث النص الوارد تدريجيًا"""
         self.chat_display.insert(tk.END, delta.value)
         self.chat_display.yview(tk.END)
 
 def chat_with_assistant(user_input, chat_display):
-    """ Sends a message and streams OpenAI's response """
+    global conversation_thread_id
 
-    # Step 1: Create a thread
-    thread = openai.beta.threads.create()
-    thread_id = thread.id  
+    # إنشاء الحوار (الثريد) مرة واحدة إذا لم يكن موجودًا
+    if conversation_thread_id is None:
+        thread = openai.beta.threads.create()
+        conversation_thread_id = thread.id
 
-    # Step 2: Add user message to the thread
+    # إضافة رسالة المستخدم إلى الحوار المستمر
     openai.beta.threads.messages.create(
-        thread_id=thread_id,
+        thread_id=conversation_thread_id,
         role="user",
         content=user_input
     )
 
-    # Step 3: Stream response
+    # بث رد المساعد باستخدام نفس معرف الحوار
     with openai.beta.threads.runs.stream(
-        thread_id=thread_id,
+        thread_id=conversation_thread_id,
         assistant_id=ASSISTANT_ID,
         event_handler=EventHandler(chat_display)
     ) as stream:
-        stream.until_done()  
+        stream.until_done()
 
 def send_message():
-    """ Handles sending user input """
+    """وظيفة إرسال رسالة المستخدم"""
     user_input = user_entry.get().strip()
     if user_input:
         chat_display.insert(tk.END, f"\nYou: {user_input}\n", "bold")
-        user_entry.delete(0, tk.END)  
+        user_entry.delete(0, tk.END)
         chat_display.yview(tk.END)
 
-        # Run OpenAI call in a separate thread
+        # تشغيل استدعاء OpenAI في خيط منفصل لتجنب تجميد واجهة المستخدم
         threading.Thread(target=chat_with_assistant, args=(user_input, chat_display), daemon=True).start()
 
-# Create GUI Window
+# إنشاء نافذة GUI
 root = tk.Tk()
 root.title("AI Chatbot with Streaming")
 
-# Chat display (scrollable)
+# نافذة عرض المحادثة (قابلة للتمرير)
 chat_display = scrolledtext.ScrolledText(root, wrap=tk.WORD, width=60, height=20, font=("Arial", 12))
 chat_display.pack(padx=10, pady=10)
 chat_display.tag_configure("bold", font=("Arial", 12, "bold"))
 
-# User input field
+# حقل إدخال المستخدم
 user_entry = tk.Entry(root, width=50, font=("Arial", 12))
 user_entry.pack(padx=10, pady=5, side=tk.LEFT, expand=True)
 
-# Send button
+# زر الإرسال
 send_button = tk.Button(root, text="Send", command=send_message, font=("Arial", 12))
 send_button.pack(padx=10, pady=5, side=tk.RIGHT)
 
-# Run the GUI
+# تشغيل واجهة المستخدم
 root.mainloop()

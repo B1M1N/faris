@@ -4,123 +4,197 @@ from tkinter import messagebox, scrolledtext
 import threading
 import sounddevice as sd
 import numpy as np
-from elevenlabs import ElevenLabs,VoiceSettings
-import numpy as np
+from elevenlabs import ElevenLabs, VoiceSettings
 import wavio
 import openai
 import pygame
 import os
-from PIL import Image, ImageTk,ImageSequence
+from PIL import Image, ImageTk, ImageSequence
 import subprocess
 import sys
-import time
+
 if sys.platform.startswith('win'):
-    os.add_dll_directory(r"C:\Program Files\VideoLAN\VLC")  # Update this path if necessary
-#ldeGOUQJqLGjlVgYn7YL
+    os.add_dll_directory(r"C:\Program Files\VideoLAN\VLC")  # حدّث المسار إذا لزم الأمر
 import vlc
-openai.api_key = os.getenv('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' )
+
+# تأكد من استيراد معالج أحداث المساعد من OpenAI
+from openai import AssistantEventHandler
+
+# تعيين مفتاح API الخاص بـ OpenAI
+openai.api_key = os.getenv('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')
 ASSISTANT_ID = "asst_FDuUSbtE6aPgnDdUYV1lKgyE"
 conversation_thread_id = None
 print("check after:", conversation_thread_id)  # Debug print
 conversation_lock = threading.Lock()
+animation_id = None
 
-# Global variables
+# المتغيرات العامة للصوت والفيديو
 recording = False
 audio_frames = []
-fs = 16000  # Sampling rate
+fs = 16000  # معدل العينات
 audio_filename = "input_audio.wav"
 output_audio_filename = "output_audio.mp3"
-VIDEO_STOP_SECONDS_BEFORE_END = 0  # Play the full video
-gif_stop_event = None  # Event to control GIF animation
-# Function to start recording
+VIDEO_STOP_SECONDS_BEFORE_END = 0  # لتشغيل الفيديو بالكامل
+
+# متغير تحكم للـ GIF (يُستخدم في دوال عرض وإيقاف الرسوم المتحركة)
+gif_stop_event = None
+
+###############################################
+# دوال عرض وإيقاف الرسوم المتحركة (GIF) - النسخة المحسّنة
+###############################################
+def display_gif(gif_path, stop_event, gif_label, root):
+    """
+    تعرض هذه الدالة ملف GIF في Label محدد، وتكرّر عرض الإطارات 
+    حتى يتم إشعارها بالتوقّف عبر stop_event.
+    """
+    try:
+        gif = Image.open(gif_path)
+        frames = [ImageTk.PhotoImage(frame.copy()) for frame in ImageSequence.Iterator(gif)]
+        frame_count = len(frames)
+
+        def animate(index):
+            if not stop_event.is_set():
+                frame = frames[index]
+                root.after(0, update_frame, frame)
+                # الحصول على مدة الإطار من معلومات الـ GIF (الافتراضي 100 مللي ثانية)
+                duration = gif.info.get('duration', 100)
+                next_index = (index + 1) % frame_count
+                root.after(int(duration), animate, next_index)
+            else:
+                root.after(0, clear_frame)
+
+        def update_frame(frame):
+            gif_label.config(image=frame)
+            gif_label.image = frame  # مهم للاحتفاظ بالصورة في الذاكرة
+
+        def clear_frame():
+            gif_label.config(image='')
+            gif_label.image = None
+
+        animate(0)
+
+    except Exception as e:
+        print(f"Error displaying GIF: {e}")
+
+
+
+def start_gif_animation(gif_path, gif_label, root):
+    """
+    بدء تشغيل الرسوم المتحركة (GIF) في خيط (Thread) مستقل.
+    """
+    global gif_stop_event
+    if gif_stop_event:
+        gif_stop_event.set()
+    gif_stop_event = threading.Event()
+    threading.Thread(target=display_gif, args=(gif_path, gif_stop_event, gif_label, root), daemon=True).start()
+
+
+def stop_gif_animation():
+    """
+    إيقاف تشغيل الرسوم المتحركة (GIF) بإشارة الـ Event.
+    """
+    global gif_stop_event
+    if gif_stop_event:
+        gif_stop_event.set()
+
+###############################################
+# تعريف فئة معالج الأحداث لبث الردود من المساعد
+###############################################
+class ResponseEventHandler(AssistantEventHandler):
+    def __init__(self, textbox):
+        super().__init__()
+        self.textbox = textbox
+        self.response = ""  # لتجميع الرد الكامل
+
+    def on_text_created(self, text) -> None:
+        # عند بدء الرد، نكتب مؤشر الرد في صندوق العرض
+        self.textbox.insert(tk.END, "\nFaris: ", "bold")
+        self.textbox.yview(tk.END)
+
+    def on_text_delta(self, delta, snapshot):
+        # تحديث الرد تدريجيًا في صندوق العرض
+        self.response += delta.value
+        self.textbox.insert(tk.END, delta.value)
+        self.textbox.yview(tk.END)
+
+###############################################
+# دوال تسجيل ومعالجة الصوت
+###############################################
 def start_recording():
     global recording, audio_frames
     recording = True
     audio_frames = []
     status_label.config(text="Recording...")
-    record_button.config(state=tk.DISABLED)
-    stop_button.config(state=tk.NORMAL)
-    threading.Thread(target=record).start()
+    threading.Thread(target=record, daemon=True).start()
 
-# Function to stop recording
 def stop_recording():
     global recording
     recording = False
     status_label.config(text="Processing...")
-    record_button.config(state=tk.DISABLED)
-    stop_button.config(state=tk.DISABLED)
-    threading.Thread(target=process_audio).start()
+    threading.Thread(target=process_audio, daemon=True).start()
 
-# Recording function
 def record():
     global audio_frames
     with sd.InputStream(samplerate=fs, channels=1, callback=audio_callback):
         while recording:
             sd.sleep(100)
 
-# Callback function to collect audio data
-def audio_callback(indata, frames, time, status):
+def audio_callback(indata, frames, time_info, status):
     audio_frames.append(indata.copy())
 
-# Function to process the recorded audio
+###############################################
+# دالة معالجة الصوت: حفظ التسجيل، النسخ إلى نص،
+# استدعاء ChatGPT لتحويل النص إلى رد، التوليد الصوتي والمرئي
+###############################################
 def process_audio():
+    global gif_label, root
     try:
-        # Start the Thinking GIF
-        start_gif_animation("gifs/thinking.gif")
+        # بدء عرض الرسوم المتحركة (GIF) أثناء المعالجة
+        start_gif_animation("gifs/thinking.gif", gif_label, root)
 
         status_label.config(text="Saving Audio...")
         audio_data = np.concatenate(audio_frames, axis=0)
         wavio.write(audio_filename, audio_data, fs, sampwidth=2)
 
-        # Transcribe audio to text
+        # تحويل الصوت إلى نص باستخدام واجهة Whisper من OpenAI
         status_label.config(text="Transcribing...")
         transcribed_text = transcribe_audio(audio_filename)
         transcribed_textbox.delete(1.0, tk.END)
         transcribed_textbox.insert(tk.END, transcribed_text)
-       # transcribed_text="عرف بنفسك"
         print("Transcribed Text:", transcribed_text)
 
-        # Get response from ChatGPT
+        # الحصول على الرد من ChatGPT باستخدام المحادثة المستمرة وبث الرد
         status_label.config(text="Generating Response...")
         response_text = chat_with_gpt(transcribed_text)
         response_textbox.delete(1.0, tk.END)
         response_textbox.insert(tk.END, response_text)
         print("ChatGPT Response:", response_text)
 
-        # Generate Manim animation with the response text
-       # status_label.config(text="Generating Animation...")
-        #generate_manim_animation(response_text)
-
-        # Convert response to speech
+        # تحويل الرد إلى كلام باستخدام ElevenLabs
         status_label.config(text="Converting Text to Speech...")
         text_to_speech(response_text, output_audio_filename)
 
-        # Merge audio and video
+        # دمج الصوت والفيديو
         status_label.config(text="Merging Audio and Video...")
         merged_video_path = "./media/videos/merged_output.mp4"
         merge_audio_and_video("./media/videos/arabic_text_animation.mp4", output_audio_filename, merged_video_path)
 
-        # Stop the Thinking GIF and start the Explanation GIF
+        # إيقاف GIF التفكير وبدء GIF الشرح
         stop_gif_animation()
-        start_gif_animation("gifs/explaining.gif")
+        start_gif_animation("gifs/explaining.gif", gif_label, root)
 
-        # Play the merged video
+        # تشغيل الفيديو المدمج باستخدام VLC في خيط منفصل
         status_label.config(text="Playing Video...")
-        threading.Thread(target=play_video_with_vlc, args=(merged_video_path,)).start()
+        threading.Thread(target=play_video_with_vlc, args=(merged_video_path,), daemon=True).start()
 
     except Exception as e:
         messagebox.showerror("Error", f"An error occurred:\n\n{e}")
     finally:
-        # Reset buttons and status label
         status_label.config(text="Ready")
-        record_button.config(state=tk.NORMAL)
-        stop_button.config(state=tk.DISABLED)
-
-   
 
 def transcribe_audio(filename):
     try:
-        # Using OpenAI Whisper API
+        # استخدام واجهة Whisper API لتحويل الصوت إلى نص
         with open(filename, "rb") as audio_file:
             response = openai.audio.transcriptions.create(
                 file=audio_file,
@@ -131,79 +205,76 @@ def transcribe_audio(filename):
     except Exception as e:
         messagebox.showerror("Error", f"Transcription failed:\n\n{e}")
         return ""
-    
-# Function to interact with ChatGPT API
+
+###############################################
+# دالة التفاعل مع ChatGPT باستخدام المحادثة المستمرة وبث الرد
+###############################################
 def chat_with_gpt(transcribed_text):
+    """
+    ترسل هذه الدالة نص المستخدم (بعد النسخ) إلى المساعد باستخدام خاصية المحادثة المستمرة.
+    إذا لم يكن هناك حوار قائم، يتم إنشاء واحد جديد وتخزين معرفه.
+    كما يتم بث الرد بشكل تدريجي إلى صندوق النص.
+    """
     global conversation_thread_id
     if not transcribed_text:
         return "لم يتم الحصول على نص من التسجيل."
     try:
-        # If no conversation thread exists, create one
+        # إنشاء محادثة جديدة إذا لم يكن معرف الحوار موجودًا
         if conversation_thread_id is None:
             thread = openai.beta.threads.create()
             conversation_thread_id = thread.id
-        print("Created new thread with id:", conversation_thread_id)  # Debug print
+            print("تم إنشاء محادثة جديدة بمعرف:", conversation_thread_id)
+        else:
+            print("إعادة استخدام معرف المحادثة الحالي:", conversation_thread_id)
         thread_id = conversation_thread_id
-        print("Created new thread with id:", conversation_thread_id)  # Debug print
 
-        # Send the transcribed text as a new message in the existing conversation
+        # إرسال رسالة المستخدم للمحادثة
         openai.beta.threads.messages.create(
             thread_id=thread_id,
             role="user",
             content=transcribed_text,
         )
+        print("تم إرسال رسالة المستخدم:", transcribed_text)
 
-        # Run the assistant
-        run = openai.beta.threads.runs.create_and_poll(
+        # بث الرد التدريجي من المساعد باستخدام ResponseEventHandler
+        event_handler = ResponseEventHandler(response_textbox)
+        with openai.beta.threads.runs.stream(
             thread_id=thread_id,
             assistant_id=ASSISTANT_ID,
-        )
-
-        # Wait for response
-        while run.status not in ["completed", "failed"]:
-            time.sleep(1)
-            run = openai.beta.threads.runs.retrieve(
-                thread_id=thread_id,
-                run_id=run.id,
-            )
-
-        # Fetch the assistant's response from the conversation thread
-        messages = openai.beta.threads.messages.list(thread_id=thread_id)
-        for message in reversed(messages.data):
-            if message.role == "assistant":
-                reply = "\n".join(
-                    block.text.value for block in message.content if hasattr(block, "text")
-                )
-                return reply
+            event_handler=event_handler
+        ) as stream:
+            stream.until_done()
+        print("رد المساعد النهائي:", event_handler.response)
+        return event_handler.response
 
     except Exception as e:
-        return f"❌ حدث خطأ أثناء الحصول على الاستجابة: {e}"
+        print("حدث خطأ في chat_with_gpt:", e)
+        return f"Error: {e}"
 
-# Function to convert text to speech using OpenAI
-
-
+###############################################
+# دالة تحويل النص إلى كلام باستخدام ElevenLabs
+###############################################
 def text_to_speech(text, output_filename):
     try:
         client = ElevenLabs(api_key="sk_274b05820004e924913b674d3c4181aae2b89df0f66a2806")
 
         voice_settings = VoiceSettings(
-            stability=0.75,        
-            similarity_boost=0.6,   
-            style=0.3,              
-            speed=0.1 
+            stability=0.75,        # ثبات الصوت
+            similarity_boost=0.6,  # تعزيز التشابه
+            style=0.3,             # أسلوب الكلام
+            speed=0.1              # سرعة الكلام
         )
         with open(output_filename, "wb") as file:
             audio_stream = client.text_to_speech.convert_as_stream(
                 voice_id="egFWq5W0j5U7Q3RFFA8g",
                 text=text,
                 model_id="eleven_multilingual_v2",
-                voice_settings=voice_settings  # تمرير كائن الإعدادات
+                voice_settings=voice_settings
             )
 
             for chunk in audio_stream:
                 file.write(chunk)
 
-      
         if os.path.exists(output_filename):
             print(f"Audio file saved successfully as {output_filename}")
         else:
@@ -212,38 +283,22 @@ def text_to_speech(text, output_filename):
     except Exception as e:
         messagebox.showerror("Error", f"Text-to-Speech conversion failed: {e}")
 
-    
-'''def text_to_speech(text, output_filename):
-    try:
-        response = openai.audio.speech.create(
-        model="tts-1",  
-        voice="coral",
-        input=text
-        )
-
-        response.stream_to_file(output_filename)
-    except Exception as e:
-        messagebox.showerror("Error", f"Text-to-Speech conversion failed: {e}")'''
-
-
-
-# Function to play the audio file using pygame
+###############################################
+# دوال تشغيل الصوت والفيديو ودمجهما باستخدام ffmpeg وVLC
+###############################################
 def play_audio(filename):
     try:
         pygame.mixer.init()
         pygame.mixer.music.load(filename)
         pygame.mixer.music.play()
-        # Do not block; allow playback to continue independently
     except Exception as e:
         messagebox.showerror("Error", f"Audio playback failed:\n\n{e}")
-
-
 
 def merge_audio_and_video(video_input, audio_input, output_path):
     try:
         command = [
             'ffmpeg',
-            '-y',  # Overwrite output files without asking
+            '-y',  # الكتابة فوق الملفات الموجودة دون استفسار
             '-i', video_input,
             '-i', audio_input,
             '-c:v', 'copy',
@@ -255,8 +310,9 @@ def merge_audio_and_video(video_input, audio_input, output_path):
         print(f"Audio and video merged into {output_path}")
     except subprocess.CalledProcessError as e:
         messagebox.showerror("Error", f"Failed to merge audio and video:\n\n{e}")
-# Function to play the video once without looping and keep the last frame
+
 def play_video_with_vlc(video_path):
+    global gif_label, root
     try:
         Instance = vlc.Instance()
         player = Instance.media_player_new()
@@ -264,16 +320,16 @@ def play_video_with_vlc(video_path):
         Media.get_mrl()
         player.set_media(Media)
 
-        # Set the video output to the Tkinter window
-        if os.name == 'nt':  # For Windows
+        # ضبط مخرج الفيديو للنافذة الخاصة بـ Tkinter
+        if os.name == 'nt':  # لنظام Windows
             player.set_hwnd(video_label.winfo_id())
         else:
             player.set_xwindow(video_label.winfo_id())
 
-        # Start playing
+        # بدء التشغيل
         player.play()
 
-        # Wait until playback is finished
+        # الانتظار حتى انتهاء التشغيل
         events = player.event_manager()
         event = threading.Event()
 
@@ -281,152 +337,90 @@ def play_video_with_vlc(video_path):
             event.set()
 
         events.event_attach(vlc.EventType.MediaPlayerEndReached, end_callback)
-
-        # Wait for the playback to finish
         event.wait()
-
-        # Stop the player after playback
         player.stop()
 
-        # Stop the Explanation GIF after playback
+        # بعد انتهاء الفيديو، تغيير GIF إلى صورة ثابتة أو رسوم مختلفة
         stop_gif_animation()
-        start_gif_animation("gifs/bw.gif")
+        start_gif_animation("gifs/bw.gif", gif_label, root)
 
     except Exception as e:
         messagebox.showerror("Error", f"Error playing video:\n\n{e}")
 
+###############################################
+# دالة لتبديل حالة التسجيل عند الضغط على زر المسافة
+###############################################
+def toggle_recording(event):
+    global recording
+    if not recording:
+        start_recording()
+    else:
+        stop_recording()
 
+###############################################
+# واجهة المستخدم الرئيسية باستخدام Tkinter
+###############################################
 def init_gui():
-
-    global root, record_button, stop_button, status_label, transcribed_textbox, response_textbox, video_label,gif_label
+    global root, status_label, transcribed_textbox, response_textbox, video_label, gif_label
+    # إنشاء نافذة رئيسية
     root = tk.Tk()
     root.title("Arabic Speech Assistant")
+    # جعل النافذة ملء الشاشة (Full Screen)
+    root.attributes("-fullscreen", True)
+    # تغيير خلفية النافذة إلى اللون الأسود
+    root.configure(bg="black")
 
-    # Set window size and position
-    window_width = 800
-    window_height = 800
-    screen_width = root.winfo_screenwidth()
-    screen_height = root.winfo_screenheight()
-    x_coord = int((screen_width / 2) - (window_width / 2))
-    y_coord = int((screen_height / 2) - (window_height / 2))
-    root.geometry(f"{window_width}x{window_height}+{x_coord}+{y_coord}")
-    root.configure(bg="#2b0311")
-
-     # Create a frame to hold the video
-    video_frame = tk.Frame(root, width=800, height=400)
+    # إنشاء إطار الفيديو (يمكن استخدامه في حال الحاجة إلى عرض فيديو)
+    video_frame = tk.Frame(root, width=800, height=400, bg="black")
     video_frame.pack(pady=10)
-
-    # Create a label to display the video
-    video_label = tk.Label(video_frame)
+    video_label = tk.Label(video_frame, bg="black")
     video_label.pack()
 
-    # Create a label to display the video
-    video_label = tk.Label(root)
-    video_label.pack(pady=10)
+    # إنشاء Label لعرض الرسوم المتحركة (GIF) في وسط النافذة
+    gif_label = tk.Label(root, bg="black")
+    gif_label.place(relx=0.5, rely=1.0, anchor=tk.S)
 
-       # Create a label to display the GIF animations
-    gif_label = tk.Label(root)
+    # إنشاء صناديق عرض النصوص
+    transcribed_label = tk.Label(root, text="Transcribed Text:", font=("Helvetica", 0), bg="black", fg="white")
+    #transcribed_label.pack(pady=5)
+    transcribed_textbox = scrolledtext.ScrolledText(root, wrap=tk.WORD, width=0, height=0,
+                                                     font=("Helvetica", 0), bg="#1f1f1f", fg="white")
+   # transcribed_textbox.pack(pady=5)
 
-    # Set the desired x and y coordinates for the GIF
-    gif_x = 0  # Replace with your desired x coordinate
-    gif_y = 0  # Replace with your desired y coordinate
+    response_label = tk.Label(root, text="Faris Response:", font=("Helvetica", 0), bg="black", fg="white")
+    #response_label.pack(pady=5)
+    response_textbox = scrolledtext.ScrolledText(root, wrap=tk.WORD, width=0, height=0,
+                                                  font=("Helvetica", 0), bg="#1f1f1f", fg="white")
+    #response_textbox.pack(pady=5)
 
-    gif_label.place(x=gif_x, y=gif_y)
+    # تسمية الحالة
+    status_label = tk.Label(root, text="Ready", font=("Helvetica", 0), bg="black", fg="white")
+    #status_label.pack(pady=0)
 
-    # Initial image or placeholder
-    placeholder_image = ImageTk.PhotoImage(Image.new('RGB', (600, 400), color='#2b0311'))
-    video_label.config(image=placeholder_image)
-    video_label.image = placeholder_image  # Keep a reference
+    # بدء تشغيل GIF ابتدائي (مثلاً صورة bw)
+    start_gif_animation("gifs/bw.gif", gif_label, root)
 
-    # Create and place buttons
-    record_button = tk.Button(root, text="Record", command=start_recording, width=15, height=2,
-                              bg="#4CAF50", fg="white")
-    record_button.pack(pady=10)
+    # ربط زر المسافة لتبديل حالة التسجيل
+    root.bind("<space>", toggle_recording)
+    # إضافة إمكانية الخروج من وضع ملء الشاشة بالضغط على مفتاح ESC
+    def exit_fullscreen(event):
+        root.attributes("-fullscreen", False)
+        root.destroy()  # إغلاق النافذة
+    root.bind("<Escape>", exit_fullscreen)
 
-    stop_button = tk.Button(root, text="Stop", command=stop_recording, width=15, height=2, state=tk.DISABLED,
-                            bg="#F44336", fg="white")
-    stop_button.pack(pady=10)
-
-    # Status label
-    status_label = tk.Label(root, text="Ready", font=("Helvetica", 20), bg="#2b0311", fg="white")
-    status_label.pack(pady=10)
-
-    # Transcribed text label and textbox
-    transcribed_label = tk.Label(root, text="Transcribed Text:", font=("Helvetica", 20), bg="#2b0311", fg="white")
-    transcribed_label.pack(pady=5)
-    transcribed_textbox = scrolledtext.ScrolledText(root, wrap=tk.WORD, width=60, height=5,
-                                                    font=("Helvetica", 20), bg="#1f1f1f", fg="white")
-    transcribed_textbox.pack(pady=5)
-
-    # Response text label and textbox
-    response_label = tk.Label(root, text="Faris Response:", font=("Helvetica", 20), bg="#2b0311", fg="white")
-    response_label.pack(pady=5)
-    response_textbox = scrolledtext.ScrolledText(root, wrap=tk.WORD, width=60, height=10,
-                                                 font=("Helvetica", 20), bg="#1f1f1f", fg="white")
-    response_textbox.pack(pady=5)
-
-    # Start the GUI loop
     root.mainloop()
-def display_gif(gif_path, stop_event):
-    try:
-        # Load the GIF
-        gif = Image.open(gif_path)
 
-        # Get the sequence of frames
-        frames = [ImageTk.PhotoImage(frame.copy()) for frame in ImageSequence.Iterator(gif)]
-        frame_count = len(frames)
-
-        def animate(index):
-            if not stop_event.is_set():
-                frame = frames[index]
-                # Schedule the frame update on the main thread
-                root.after(0, update_frame, frame)
-                # Schedule the next frame
-                index = (index + 1) % frame_count
-                root.after(int(gif.info['duration']), animate, index)
-            else:
-                # Clear the image when stopping
-                root.after(0, clear_frame)
-
-        def update_frame(frame):
-            gif_label.config(image=frame)
-            gif_label.image = frame  # Keep a reference
-
-        def clear_frame():
-            gif_label.config(image='')
-            gif_label.image = None
-
-        # Start the animation
-        animate(0)
-
-    except Exception as e:
-        messagebox.showerror("Error", f"Error displaying GIF:\n\n{e}")
-
-def start_gif_animation(gif_path):
-    global gif_stop_event
-    # Stop any existing GIF animation
-    if gif_stop_event:
-        gif_stop_event.set()
-
-    gif_stop_event = threading.Event()
-    threading.Thread(target=display_gif, args=(gif_path, gif_stop_event)).start()
-
-def stop_gif_animation():
-    global gif_stop_event
-    if gif_stop_event:
-        gif_stop_event.set()
-
-# Main function
+###############################################
+# الدالة الرئيسية
+###############################################
 def main():
-    # Set up OpenAI API key
-    openai.api_key ='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' # Use environment variable for API key
+    # تعيين مفتاح API الخاص بـ OpenAI (يمكنك استخدام متغيرات البيئة)
+    openai.api_key = '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'
             
-    start_gif_animation("gifs/bw.gif")
-
-    # Initialize Pygame mixer
+    # تهيئة مشغل الصوت (Pygame)
     pygame.mixer.init()
 
-    # Initialize the GUI
+    # بدء واجهة المستخدم
     init_gui()
 
 if __name__ == "__main__":
