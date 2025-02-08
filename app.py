@@ -21,8 +21,8 @@ import vlc
 from openai import AssistantEventHandler
 
 # Set the OpenAI API key
-openai.api_key = os.getenv('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')
-ASSISTANT_ID = "asst_FDuUSbtE6aPgnDdUYV1lKgyE"
+openai.api_key = os.getenv('')
+ASSISTANT_ID = ""
 conversation_thread_id = None
 print("check after:", conversation_thread_id)  # Debug print
 conversation_lock = threading.Lock()
@@ -243,7 +243,7 @@ def chat_with_gpt(transcribed_text):
 # Function to convert text to speech using ElevenLabs
 def text_to_speech(text, output_filename):
     try:
-        client = ElevenLabs(api_key="sk_274b05820004e924913b674d3c4181aae2b89df0f66a2806")
+        client = ElevenLabs(api_key="")
 
         voice_settings = VoiceSettings(
             stability=0.75,        # Voice stability
@@ -253,7 +253,7 @@ def text_to_speech(text, output_filename):
         )
         with open(output_filename, "wb") as file:
             audio_stream = client.text_to_speech.convert_as_stream(
-                voice_id="egFWq5W0j5U7Q3RFFA8g",
+                voice_id="",
                 text=text,
                 model_id="eleven_multilingual_v2",
                 voice_settings=voice_settings
@@ -398,7 +398,7 @@ def init_gui():
 # Main function
 def main():
     # Set the OpenAI API key (you can use environment variables)
-    openai.api_key = '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'
+    openai.api_key = ''
             
     # Initialize the audio player (Pygame)
     pygame.mixer.init()
